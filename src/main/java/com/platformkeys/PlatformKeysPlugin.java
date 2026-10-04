@@ -7,7 +7,6 @@ import java.util.Map;
 import javax.inject.Inject;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.Client;
-import net.runelite.api.MenuAction;
 import net.runelite.api.events.ClientTick;
 import net.runelite.api.events.WidgetClosed;
 import net.runelite.api.events.WidgetLoaded;
@@ -163,19 +162,6 @@ public class PlatformKeysPlugin extends Plugin implements KeyListener
 		return config.profile().resolve() == KeyProfile.MAC ? config.macNumberKeys() : config.windowsNumberKeys();
 	}
 
-	private void toggleSearch()
-	{
-		clientThread.invoke(() ->
-		{
-			Widget searchButton = client.getWidget(InterfaceID.Bankmain.SEARCH);
-			if (searchButton == null)
-			{
-				return;
-			}
-			client.menuAction(-1, searchButton.getId(), MenuAction.CC_OP, 1, -1, "Search", "");
-		});
-	}
-
 	@Override
 	public void keyPressed(KeyEvent e)
 	{
@@ -222,14 +208,15 @@ public class PlatformKeysPlugin extends Plugin implements KeyListener
 		if (code == KeyEvent.VK_ESCAPE && config.escapeClosesSearch() && searchActive())
 		{
 			e.consume();
-			toggleSearch();
+			// Clears the search text and closes the search prompt
+			bankSearch.reset(true);
 			return;
 		}
 
 		if (config.typeToSearch() && !searchActive() && mods == 0 && Character.isLetterOrDigit(e.getKeyChar()))
 		{
 			// The triggering character is not replayed; the search box opens empty.
-			toggleSearch();
+			bankSearch.initSearch();
 		}
 	}
 
