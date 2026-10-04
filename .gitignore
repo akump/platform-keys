@@ -1,0 +1,20 @@
+# Gradle
+.gradle/
+build/
+
+# IDE
+.idea/
+*.iml
+*.ipr
+*.iws
+out/
+bin/
+.classpath
+.project
+.settings/
+.vscode/
+nbactions.xml
+nb-configuration.xml
+
+# OS
+.DS_Store
