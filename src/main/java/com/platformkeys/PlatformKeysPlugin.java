@@ -8,6 +8,7 @@ import javax.inject.Inject;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.Client;
 import net.runelite.api.MenuAction;
+import net.runelite.api.events.ClientTick;
 import net.runelite.api.events.WidgetClosed;
 import net.runelite.api.events.WidgetLoaded;
 import net.runelite.api.widgets.Widget;
@@ -31,6 +32,9 @@ import net.runelite.client.plugins.bank.BankSearch;
 public class PlatformKeysPlugin extends Plugin implements KeyListener
 {
 	// Modifiers we care about when comparing against the configured profile
+	// Text the core Key Remapping plugin shows on the chat input line while chat is locked
+	private static final String PRESS_ENTER_TO_CHAT = "Press Enter to Chat...";
+
 	private static final int MOD_MASK = KeyEvent.CTRL_DOWN_MASK | KeyEvent.META_DOWN_MASK
 		| KeyEvent.ALT_DOWN_MASK | KeyEvent.SHIFT_DOWN_MASK;
 
@@ -39,6 +43,10 @@ public class PlatformKeysPlugin extends Plugin implements KeyListener
 	private boolean swallowTyped;
 	// Tracked from widget events because key events arrive on the AWT thread, where widgets can't be inspected
 	private volatile boolean bankOpen;
+	// Refreshed every client tick; true while number keys belong to a chatbox dialogue
+	private volatile boolean dialogOpen;
+	// Refreshed every client tick; true while the core Key Remapping plugin is in its Enter-to-chat typing mode
+	private volatile boolean chatTyping;
 
 	@Inject
 	private Client client;
@@ -54,6 +62,9 @@ public class PlatformKeysPlugin extends Plugin implements KeyListener
 
 	@Inject
 	private BankSearch bankSearch;
+
+	@Inject
+	private ConfigManager configManager;
 
 	@Provides
 	PlatformKeysConfig provideConfig(ConfigManager configManager)
@@ -109,17 +120,38 @@ public class PlatformKeysPlugin extends Plugin implements KeyListener
 	}
 
 	/**
-	 * True while the chatbox is showing a dialogue (NPC chat, option menus, level-ups) or the bank pin keypad is up,
-	 * where number keys pick options. Same test the core Key Remapping plugin uses.
+	 * Refreshes {@link #dialogOpen} on the client thread, where widgets can be inspected safely.
+	 * A dialogue is anything attached to the chatbox's modal layer (NPC chat, option menus, "What would you like
+	 * to make?" prompts, level-ups), plus the cases the core Key Remapping plugin checks and the bank pin keypad.
 	 */
-	private boolean dialogOpen()
+	@Subscribe
+	public void onClientTick(ClientTick event)
 	{
-		return selfHidden(InterfaceID.Chatbox.MES_LAYER_HIDE) || selfHidden(InterfaceID.Chatbox.CHATDISPLAY)
-			|| client.getWidget(InterfaceID.Chatmenu.OPTIONS) != null
+		Widget modal = client.getWidget(InterfaceID.Chatbox.CHATMODAL);
+		dialogOpen = (modal != null && modal.getNestedChildren().length > 0)
+			|| selfHidden(InterfaceID.Chatbox.MES_LAYER_HIDE) || selfHidden(InterfaceID.Chatbox.CHATDISPLAY)
 			|| !selfHidden(InterfaceID.BankpinKeypad.UNIVERSE);
+		chatTyping = keyRemappingTyping();
 	}
 
-	// isSelfHidden rather than isHidden: this runs on the AWT thread, where isHidden is not allowed
+	/**
+	 * The core Key Remapping plugin locks the chatbox behind "Press Enter to Chat..." and unlocks it while the
+	 * player is typing a message. Its typing flag isn't public, so read it back from the chat input line.
+	 */
+	private boolean keyRemappingTyping()
+	{
+		if (!"true".equals(configManager.getConfiguration("runelite", "keyremappingplugin")))
+		{
+			return false;
+		}
+		Widget input = client.getWidget(InterfaceID.Chatbox.INPUT);
+		if (input == null || input.getText() == null)
+		{
+			return false;
+		}
+		return !input.getText().endsWith(PRESS_ENTER_TO_CHAT);
+	}
+
 	private boolean selfHidden(int component)
 	{
 		Widget w = client.getWidget(component);
@@ -150,9 +182,10 @@ public class PlatformKeysPlugin extends Plugin implements KeyListener
 		int code = e.getKeyCode();
 		int mods = e.getModifiersEx() & MOD_MASK;
 
-		// Number keys -> F1-F10. Skipped while a chatbox input (bank search, Withdraw-X) or a dialogue is open
-		// so digits still type there and still pick dialogue options.
-		int slot = config.remapNumbers() && mods == 0 && !inputDialogOpen() && !dialogOpen() ? numberKeys().slotFor(code) : -1;
+		// Number keys -> F1-F10. Skipped while a chatbox input (bank search, Withdraw-X), a dialogue, or
+		// Enter-to-chat typing is active, so digits still type there and still pick dialogue options.
+		boolean numbersNeeded = inputDialogOpen() || dialogOpen || chatTyping;
+		int slot = config.remapNumbers() && mods == 0 && !numbersNeeded ? numberKeys().slotFor(code) : -1;
 		if (slot >= 0)
 		{
 			int target = KeyEvent.VK_F1 + slot;

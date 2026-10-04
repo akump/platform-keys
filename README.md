@@ -21,7 +21,13 @@ Number keys 1-9 and 0 are sent to the game as F1-F10, so you can switch side pan
 | Mac | Number row |
 | Windows | Numpad |
 
-The remap is paused while a chatbox prompt is open (bank search, Withdraw-X and similar), so you can still type numbers there. Remapped keys do not type digits into normal chat while the remap is on.
+The remap is paused, so the number keys type or select as normal, while:
+
+- a chatbox prompt is open (bank search, Withdraw-X and similar)
+- a dialogue is open (NPC chat, option menus, "What would you like to make?" prompts)
+- you are typing a chat message after pressing Enter, if you use the core Key Remapping plugin's "Press Enter to Chat" mode
+
+Without Key Remapping enabled, remapped keys do not type digits into normal chat while the remap is on.
 
 ## Settings
 
