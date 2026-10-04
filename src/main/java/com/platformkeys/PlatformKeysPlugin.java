@@ -108,6 +108,24 @@ public class PlatformKeysPlugin extends Plugin implements KeyListener
 		return client.getVarcIntValue(VarClientID.MESLAYERMODE) != 0;
 	}
 
+	/**
+	 * True while the chatbox is showing a dialogue (NPC chat, option menus, level-ups) or the bank pin keypad is up,
+	 * where number keys pick options. Same test the core Key Remapping plugin uses.
+	 */
+	private boolean dialogOpen()
+	{
+		return selfHidden(InterfaceID.Chatbox.MES_LAYER_HIDE) || selfHidden(InterfaceID.Chatbox.CHATDISPLAY)
+			|| client.getWidget(InterfaceID.Chatmenu.OPTIONS) != null
+			|| !selfHidden(InterfaceID.BankpinKeypad.UNIVERSE);
+	}
+
+	// isSelfHidden rather than isHidden: this runs on the AWT thread, where isHidden is not allowed
+	private boolean selfHidden(int component)
+	{
+		Widget w = client.getWidget(component);
+		return w == null || w.isSelfHidden();
+	}
+
 	private NumberKeys numberKeys()
 	{
 		return config.profile().resolve() == KeyProfile.MAC ? config.macNumberKeys() : config.windowsNumberKeys();
@@ -132,8 +150,9 @@ public class PlatformKeysPlugin extends Plugin implements KeyListener
 		int code = e.getKeyCode();
 		int mods = e.getModifiersEx() & MOD_MASK;
 
-		// Number keys -> F1-F10. Skipped while a chatbox input (bank search, Withdraw-X) is open so digits still type there.
-		int slot = config.remapNumbers() && mods == 0 && !inputDialogOpen() ? numberKeys().slotFor(code) : -1;
+		// Number keys -> F1-F10. Skipped while a chatbox input (bank search, Withdraw-X) or a dialogue is open
+		// so digits still type there and still pick dialogue options.
+		int slot = config.remapNumbers() && mods == 0 && !inputDialogOpen() && !dialogOpen() ? numberKeys().slotFor(code) : -1;
 		if (slot >= 0)
 		{
 			int target = KeyEvent.VK_F1 + slot;
