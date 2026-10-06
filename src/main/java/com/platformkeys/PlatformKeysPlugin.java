@@ -15,6 +15,7 @@ import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.gameval.VarClientID;
 import net.runelite.client.callback.ClientThread;
 import net.runelite.client.config.ConfigManager;
+import net.runelite.client.config.Keybind;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.input.KeyListener;
 import net.runelite.client.input.KeyManager;
@@ -42,6 +43,7 @@ public class PlatformKeysPlugin extends Plugin implements KeyListener
 	private boolean swallowTyped;
 	// Tracked from widget events because key events arrive on the AWT thread, where widgets can't be inspected
 	private volatile boolean bankOpen;
+	private volatile boolean seedVaultOpen;
 	// Refreshed every client tick; true while number keys belong to a chatbox dialogue
 	private volatile boolean dialogOpen;
 	// Refreshed every client tick; true while the core Key Remapping plugin is in its Enter-to-chat typing mode
@@ -79,6 +81,8 @@ public class PlatformKeysPlugin extends Plugin implements KeyListener
 		{
 			Widget bank = client.getWidget(InterfaceID.Bankmain.UNIVERSE);
 			bankOpen = bank != null && !bank.isHidden();
+			Widget vault = client.getWidget(InterfaceID.SeedVault.UNIVERSE);
+			seedVaultOpen = vault != null && !vault.isHidden();
 		});
 	}
 
@@ -87,6 +91,7 @@ public class PlatformKeysPlugin extends Plugin implements KeyListener
 	{
 		keyManager.unregisterKeyListener(this);
 		bankOpen = false;
+		seedVaultOpen = false;
 	}
 
 	@Subscribe
@@ -96,6 +101,10 @@ public class PlatformKeysPlugin extends Plugin implements KeyListener
 		{
 			bankOpen = true;
 		}
+		else if (event.getGroupId() == InterfaceID.SEED_VAULT)
+		{
+			seedVaultOpen = true;
+		}
 	}
 
 	@Subscribe
@@ -104,6 +113,10 @@ public class PlatformKeysPlugin extends Plugin implements KeyListener
 		if (event.getGroupId() == InterfaceID.BANKMAIN)
 		{
 			bankOpen = false;
+		}
+		else if (event.getGroupId() == InterfaceID.SEED_VAULT)
+		{
+			seedVaultOpen = false;
 		}
 	}
 
@@ -157,9 +170,64 @@ public class PlatformKeysPlugin extends Plugin implements KeyListener
 		return w == null || w.isSelfHidden();
 	}
 
-	private NumberKeys numberKeys()
+	/** The active profile's keys for F1-F12, in order. */
+	private Keybind[] fKeys()
 	{
-		return config.profile().resolve() == KeyProfile.MAC ? config.macNumberKeys() : config.windowsNumberKeys();
+		if (config.profile().resolve() == KeyProfile.MAC)
+		{
+			return new Keybind[]{
+				config.macF1(), config.macF2(), config.macF3(), config.macF4(), config.macF5(), config.macF6(),
+				config.macF7(), config.macF8(), config.macF9(), config.macF10(), config.macF11(), config.macF12()
+			};
+		}
+		return new Keybind[]{
+			config.windowsF1(), config.windowsF2(), config.windowsF3(), config.windowsF4(), config.windowsF5(), config.windowsF6(),
+			config.windowsF7(), config.windowsF8(), config.windowsF9(), config.windowsF10(), config.windowsF11(), config.windowsF12()
+		};
+	}
+
+	/** Index of the F-key (0 = F1) the key code is bound to in the active profile, or -1. */
+	private int fKeySlot(int keyCode)
+	{
+		if (keyCode == KeyEvent.VK_UNDEFINED)
+		{
+			return -1;
+		}
+		Keybind[] keys = fKeys();
+		for (int i = 0; i < keys.length; i++)
+		{
+			if (keys[i].getKeyCode() == keyCode)
+			{
+				return i;
+			}
+		}
+		return -1;
+	}
+
+	/** Opens the search prompt of whichever of the bank or seed vault is open. */
+	private void openSearch()
+	{
+		if (bankOpen)
+		{
+			// Clears any existing search text/filter and opens a fresh search prompt
+			bankSearch.initSearch();
+			return;
+		}
+
+		// The seed vault has no BankSearch equivalent; run its Search button's own script, as the core Bank plugin does
+		clientThread.invoke(() ->
+		{
+			Widget searchButton = client.getWidget(InterfaceID.SeedVault.SEARCH);
+			if (searchButton == null || searchButton.isHidden())
+			{
+				return;
+			}
+			Object[] onOp = searchButton.getOnOpListener();
+			if (onOp != null)
+			{
+				client.runScript(onOp);
+			}
+		});
 	}
 
 	@Override
@@ -168,10 +236,10 @@ public class PlatformKeysPlugin extends Plugin implements KeyListener
 		int code = e.getKeyCode();
 		int mods = e.getModifiersEx() & MOD_MASK;
 
-		// Number keys -> F1-F10. Skipped while a chatbox input (bank search, Withdraw-X), a dialogue, or
-		// Enter-to-chat typing is active, so digits still type there and still pick dialogue options.
-		boolean numbersNeeded = inputDialogOpen() || dialogOpen || chatTyping;
-		int slot = config.remapNumbers() && mods == 0 && !numbersNeeded ? numberKeys().slotFor(code) : -1;
+		// Configured keys -> F1-F12. Skipped while a chatbox input (bank search, Withdraw-X), a dialogue, or
+		// Enter-to-chat typing is active, so the keys still type there and still pick dialogue options.
+		boolean keysNeeded = inputDialogOpen() || dialogOpen || chatTyping;
+		int slot = config.remapNumbers() && mods == 0 && !keysNeeded ? fKeySlot(code) : -1;
 		if (slot >= 0)
 		{
 			int target = KeyEvent.VK_F1 + slot;
@@ -183,7 +251,7 @@ public class PlatformKeysPlugin extends Plugin implements KeyListener
 		}
 		swallowTyped = false;
 
-		if (!bankOpen)
+		if (!bankOpen && !seedVaultOpen)
 		{
 			return;
 		}
@@ -200,12 +268,11 @@ public class PlatformKeysPlugin extends Plugin implements KeyListener
 				return;
 			}
 			e.consume();
-			// Clears any existing search text/filter and opens a fresh search prompt
-			bankSearch.initSearch();
+			openSearch();
 			return;
 		}
 
-		if (code == KeyEvent.VK_ESCAPE && config.escapeClosesSearch() && searchActive())
+		if (bankOpen && code == KeyEvent.VK_ESCAPE && config.escapeClosesSearch() && searchActive())
 		{
 			e.consume();
 			// Clears the search text and closes the search prompt
@@ -216,15 +283,15 @@ public class PlatformKeysPlugin extends Plugin implements KeyListener
 		if (config.typeToSearch() && !searchActive() && mods == 0 && Character.isLetterOrDigit(e.getKeyChar()))
 		{
 			// The triggering character is not replayed; the search box opens empty.
-			bankSearch.initSearch();
+			openSearch();
 		}
 	}
 
 	@Override
 	public void keyTyped(KeyEvent e)
 	{
-		// Stop the digit of a remapped key from also being typed into chat
-		if (swallowTyped && Character.isDigit(e.getKeyChar()))
+		// Stop the character of a remapped key from also being typed into chat
+		if (swallowTyped)
 		{
 			e.consume();
 		}
